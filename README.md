@@ -22,14 +22,15 @@ Analyzed multi-level dataset incorporating student-level variables (self-reporte
 ## Key Results
 
 #### Average Treatment Effect:
-
 - Plug-in estimate: 0.412
 - AIPW estimate: 0.414 (doubly robust)
 - 95% Confidence Interval: [0.382, 0.446]
   
-#### Statistical Significance: Results demonstrate nudge-like interventions significantly improve student achievement, with confidence interval entirely above zero indicating robust positive effect.
+#### Statistical Significance: 
+Results demonstrate nudge-like interventions significantly improve student achievement, with confidence interval entirely above zero indicating robust positive effect.
 
-#### Validation: Propensity scores ranged [0.18, 0.45] with no positivity violations. Treatment and control groups showed comparable distributions across all covariates.
+#### Validation: 
+Propensity scores ranged [0.18, 0.45] with no positivity violations. Treatment and control groups showed comparable distributions across all covariates.
 
 ## Implications & Impact
 
