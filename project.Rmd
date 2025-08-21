@@ -1,0 +1,192 @@
+---
+title: "Stats Mod Project"
+author: "Shruti Elangovan"
+date: "2025-04-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction/Motivation
+
+In this poster, we explore whether individuals can improve their intellectual abilities over time. Specifically, we examine the causal effect of a “nudge-like” intervention that could foster a growth mindset among students. Using data collected from 10,000 students across 76 schools, we analyze the impact of this intervention on students’ intellectual development and performance.
+
+## Data Ingestion and Explorations
+
+```{r}
+library(psych)
+data <- read.csv("data.csv")
+summary_stats <- describe(data)
+summary_stats[c("mean", "sd", "median","min", "max")]
+
+```
+
+```{r}
+library(ggplot2)
+library(reshape2)
+ 
+cor_data <- melt(cor(data, use = "complete.obs"))
+
+ggplot(cor_data, aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = round(value, 2)), color = "black") +
+  scale_fill_gradient2(low = "skyblue", mid = "white", high = "coral", midpoint = 0) +
+  theme_minimal() +
+  labs(title = "Correlation Matrix")
+```
+
+## Visualizations
+
+```{r}
+boxplot(data$y ~ data$z, 
+        main= "Effect of Treatment on Student Achievement", 
+        xlab= "Treatement Group(Control = 0, Nudge-Like Treatement = 1)", 
+        ylab= "Student Achievement",
+        col = c("coral","skyblue"))
+```
+
+```{r}
+#selfrpt, mindset, test
+
+col_name <- c("selfrpt","mindset","test")
+density_plots <-list()
+for (i in 1:length(col_name)) {
+  temp_df <- data.frame(
+    covariate = data[[col_name[i]]],
+    treatment = data$z
+  )
+  density_plots[[i]] <- ggplot(temp_df, aes(x = covariate, fill = as.factor(treatment))) +
+    geom_density(alpha = 0.5) +
+    labs(
+      title = paste("Plot of", col_name[i], "by Treatment Group"),
+      fill = "Treatment"
+    )
+}
+print(density_plots)
+temp_df <- data.frame(
+    covariate = as.factor(data$gender),
+    treatment = as.factor(data$z)
+  )
+bar_plots<- ggplot(temp_df, aes(x = covariate, fill = treatment)) +
+    geom_bar(position = "dodge") +
+    labs(
+      title = paste("Bar Plot of gender by Treatment Group"),
+      x = "gender",
+      y = "Count",
+      fill = "Treatment"
+    )
+print(bar_plots)
+```
+
+```{r}
+
+```
+
+## Confounder Identification
+
+The variables that affect both the outcome and the treatment are
+
+```{r}
+model_z <- glm(z ~ . , family = binomial, data = data)
+summary_z <- summary(model_z)
+pvals_z <- summary_z$coefficients[, "Pr(>|z|)"]
+covariates_z <- names(pvals_z[pvals_z < 0.05 & names(pvals_z) != "(Intercept)"])
+
+
+model_y <- lm(y ~ . , data = data)
+summary_y <- summary(model_y)
+significant_coeffs <- summary_y$coefficients[summary_y$coefficients[, 4] < 0.05, ]
+covariates_y <- rownames(significant_coeffs)
+
+imp_covariates <- intersect(covariates_z, covariates_y)
+
+print(imp_covariates)
+```
+
+## Data Analysis
+
+### Average Treatment Effect Estimate
+
+The Average treatment effect(Plug-in and AIPW) have been calculated under the below assumtions the below mentioned assumption :\
+1.) Consistency : A = a =⇒ Ya = Y
+
+2.) No Unmeasured Confounding Assumption
+
+3.) Under the 2nd Assumption Randomization : A ⊥⊥ Ya for each a ∈ {0, 1}
+
+4.) Positivity Assumption
+
+```{r}
+library(dplyr)
+fit0 <- lm(y ~ . , data = data %>% filter(z == 0) %>% select(-z))
+fit1 <- lm(y ~ . , data = data %>% filter(z == 1) %>% select(-z))
+mu0 <- predict(fit0, newdata=data[ , !(names(data) %in% c("z","y"))])
+mu1 <- predict(fit1, newdata=data[ , !(names(data) %in% c("z","y"))])
+ate <- mean(mu1 - mu0)
+print(ate)
+```
+
+### AIPW Estimate
+
+Here we see that the AIPW Estimate are equal to the plug-in estimate, i.e, the correction term is very small. Hence we can conclude that the models created for both the treatment and the control are correct.
+
+```{r}
+a <- glm(z ~ ., data = data%>% select(-y), family = "binomial")
+pscore <- predict(a, type = "response")
+## Density plot for the propensity scores of the two controlgroups
+temp_df <- data.frame(
+    pi_hat = pscore,
+    treatment = data$z
+  )
+ggplot(temp_df, aes(x = pi_hat, fill = as.factor(treatment))) +
+    geom_density(alpha = 0.5) +
+    labs(
+      title = paste("Plot of Propensity Score by Treatment Group"),
+      fill = "Treatment"
+    )
+
+cat("Range of propensity score [",range(pscore),"] \n")
+n <- nrow(data)
+aipw_estimate <- mean(mu1 - mu0) + mean(data$z*(data$y-mu1)/pscore - ((1-data$z)*(data$y-mu0))/(1-pscore))
+cat("AIPW Estimate: ",aipw_estimate,"\n")
+sd_ate <- sd((mu1 - mu0 + data$z * (data$y - mu1)) / pscore - ((1 - data$z) * (data$y - mu0) / (1 - pscore)))
+cat("Confidence Interval :[", aipw_estimate-((1.96*sd_ate)/sqrt(n)),",",aipw_estimate+((1.96*sd_ate)/sqrt(n)),"]\n")
+```
+
+```{r}
+### Love plots ###
+library(cobalt)
+form_A <- paste0("z ~ ", paste0(colnames(data)[3:ncol(data)], collapse=" + "))
+love.plot(x = data%>% select(-y)%>% select(-z), treat = data$z, weights = data$z/pscore + (1-data$z)/(1-pscore),
+          stars="raw")
+covar_name <- "selfrpt"
+covar <- data$selfrpt
+mean1 <- sum(data$z*covar/pscore) / sum(data$z/pscore)
+mean0 <- sum((1-data$z)*covar/(1-pscore)) / sum((1-data$z)/(1-pscore))
+unadj.pooled.sd <- sqrt((var(covar[data$z==1])+var(covar[data$z==0]))/2)
+(mean1-mean0) / unadj.pooled.sd # adjusted
+mean1.unadj <- mean(covar[data$z==1])
+mean0.unadj <- mean(covar[data$z==0])
+(mean1.unadj-mean0.unadj) / unadj.pooled.sd # unadjusted
+# compare with cobalt output:
+unadj.smd <- bal.tab(as.formula(form_A), data = data)
+adj.smd <- bal.tab(as.formula(form_A), data = data, weights=data$z/pscore + (1-data$z)/(1-pscore))
+unadj.smd$Balance[covar_name, ]
+adj.smd$Balance[covar_name, ]
+
+fit_pihat2 <- glm(z ~ ., family=binomial(), data=data %>% select(-y))
+summary(fit_pihat2)
+pihat2 <- predict(fit_pihat2, type="response")
+love.plot(x = data%>% select(-y)%>% select(-z), treat = data$z, weights = data$z/pihat2 + (1-data$z)/(1-pihat2), 
+          stars="raw")
+```
+
+## Results
+
+In this project, we used linear regression models separately for the treated and control groups to estimate the expected outcomes under each treatment groups. We then computed two estimates for the Average Treatment Effect (ATE): the Plug-in estimator and the AIPW estimator. Both methods provided us with the same estimate of 0.413. This suggests that the regression models for each group were accurate, as the correction term in the AIPW formula was effectively zero (on the order of \~10⁻¹³). The high value(corresponding to the the outcome) of the estimated ATE suggests that the nudge-like interventions has an impact on a student's intelligence. Based on these results, we can effectively conclude that a person's intelligence can be substantially improved over time.
+
+## Potential Drawbacks
+
+The results obtained rely on the validity of three strong assumptions: Consistency, No Unmeasured Confounding, and Positivity. While the assumptions of consistency and positivity are valid for our analysis, the assumption of no unmeasured confounding is much harder to verify. In our context, both the outcome (student's achievement) and the treatment (nudge-like intervention) could be influenced by unobserved variables such as parental education or socioeconomic status—that are not accounted for in our analysis.
